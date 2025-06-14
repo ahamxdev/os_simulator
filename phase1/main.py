@@ -3,7 +3,6 @@ from process import Process
 from scheduler import fcfs_scheduler
 
 def main():
-
     input_lines = sys.stdin.read().splitlines()
     idx = 0
 
@@ -33,9 +32,6 @@ def main():
         processes.append(proc)
 
     output = fcfs_scheduler(processes)
-    print(len(output))
-    for line in output:
-        print(line)
 
 if __name__ == "__main__":
     main()

@@ -74,4 +74,23 @@ def fcfs_scheduler(processes):
                 sleep_list.append((end, pid))
                 indices[pid] += 1
 
+    max_time = max((int(line.split()[3]) for line in output if line.startswith("EXECUTE") or line.startswith("WAIT")), default=0)
+    timeline = {pid: ["-"] * (max_time + 1) for pid in range(len(processes))}
+
+    for line in output:
+        parts = line.split()
+        pid = int(parts[1])
+        start = int(parts[2])
+        end = int(parts[3])
+        status = "E" if parts[0] == "EXECUTE" else "W"
+        for t in range(start, end):
+            timeline[pid][t] = status
+
+    print(len(output))
+    for line in output:
+        print(line)
+    print("Timeline:")
+    for pid in range(len(processes)):
+        print(f"P{pid}: [{''.join(timeline[pid])}]")
+
     return output
