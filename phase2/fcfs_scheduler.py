@@ -2,18 +2,46 @@ from collections import deque
 from copy import deepcopy
 from process import Process
 
+def is_safe_state(available, allocation, need):
+    n = len(allocation)
+    m = len(available)
+    work = available[:]
+    finish = [False] * n
 
-def fcfs_scheduler(processes):
+    while True:
+        found = False
+        for i in range(n):
+            if not finish[i] and all(need[i][j] <= work[j] for j in range(m)):
+                for j in range(m):
+                    work[j] += allocation[i][j]
+                finish[i] = True
+                found = True
+        if not found:
+            break
+
+    return all(finish)
+
+def fcfs_scheduler(processes, total_resources):
     current_time = 0
-    ready_queue = deque([{'proc': p, 'arrival': 0, 'index': 0} for p in processes])
+    n = len(processes)
+    m = len(total_resources)
+
+    available_resources = total_resources[:]
+    allocation = [[0]*m for _ in range(n)]
+    need = [[0]*m for _ in range(n)]
+
+    ready_queue = deque([{'proc': p, 'index': 0} for p in processes])
     sleep_list = []
     blocked_on_resource = {}
-    resource_locks = {}
     output = []
     timeline = {}
-    next_pid = max(p.pid for p in processes) + 1
 
-    while ready_queue or sleep_list or any(blocked_on_resource.values()):
+    max_runtime = 100000
+    iteration = 0
+
+    while (ready_queue or sleep_list or any(blocked_on_resource.values())) and iteration < max_runtime:
+        iteration += 1
+
         sleep_list.sort(key=lambda x: x[0])
         for wake_time, p_obj in sleep_list[:]:
             if wake_time <= current_time:
@@ -21,7 +49,7 @@ def fcfs_scheduler(processes):
                 sleep_list.remove((wake_time, p_obj))
 
         for res, queue in list(blocked_on_resource.items()):
-            if res not in resource_locks and queue:
+            if available_resources[res] > 0 and queue:
                 ready_queue.append(queue.popleft())
                 if not queue:
                     del blocked_on_resource[res]
@@ -58,39 +86,46 @@ def fcfs_scheduler(processes):
             current['index'] += 1
             current_time += dur
 
-        elif op == 'Lock':
+        elif op == 'Allocate':
             res = cmd[1]
-            if res not in resource_locks:
-                resource_locks[res] = proc.pid
-                output.append(f"LOCK {proc.pid} {res} {current_time}")
+            qty = cmd[2]
+            pid = proc.pid
+            if qty == 0:
+                current['index'] += 1
+                ready_queue.append(current)
+                continue
+
+            if qty <= available_resources[res]:
+                # بگیر
+                available_resources[res] -= qty
+                allocation[pid][res] += qty
+                output.append(f"TAKE {pid} {res} {qty} {current_time}")
                 current['index'] += 1
                 ready_queue.append(current)
             else:
+                output.append(f"WAIT {pid} {current_time} {current_time + 1}")
+                timeline[pid] += ['W']
                 if res not in blocked_on_resource:
                     blocked_on_resource[res] = deque()
                 blocked_on_resource[res].append(current)
+                current_time += 1
 
-        elif op == 'Unlock':
+        elif op == 'Free':
             res = cmd[1]
-            if resource_locks.get(res) == proc.pid:
-                del resource_locks[res]
-                output.append(f"UNLOCK {proc.pid} {res} {current_time}")
-            current['index'] += 1
-            ready_queue.append(current)
-
-        elif op == 'Fork':
-            child = Process(next_pid)
-            child.commands = deepcopy(proc.commands[current['index'] + 1:])
-            output.append(f"FORK {proc.pid} {next_pid} {current_time}")
-            timeline[child.pid] = []
-            ready_queue.append({'proc': child, 'arrival': current_time, 'index': 0})
-            next_pid += 1
+            qty = cmd[2]
+            pid = proc.pid
+            freed_qty = min(qty, allocation[pid][res])
+            allocation[pid][res] -= freed_qty
+            available_resources[res] += freed_qty
+            output.append(f"GIVE {pid} {res} {freed_qty} {current_time}")
             current['index'] += 1
             ready_queue.append(current)
 
         elif op == 'Exit':
             output.append(f"EXIT {proc.pid} {current_time}")
 
+    if iteration >= max_runtime:
+        print("Warning: Max runtime exceeded, breaking loop to avoid infinite loop.")
 
     max_time = max((int(line.split()[-1]) for line in output if line.startswith(('EXECUTE', 'WAIT'))), default=0)
     for pid in timeline:
