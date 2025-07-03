@@ -1,0 +1,14 @@
+2
+3
+10 5 7
+5
+Allocate 3 0
+Run 4
+Allocate 2 1
+Free 3 0
+Run 2
+4
+Allocate 2 1
+Run 3
+Free 2 1
+Run 2

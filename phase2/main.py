@@ -1,14 +1,14 @@
-import os
-from input_reader import read_input
-from fcfs_scheduler import fcfs_scheduler
+# main.py
+import sys
+from input_parser import parse_input
+from simulation import run_simulation
 
-def main():
-    file_path = os.path.join("..", "phase1", "input.txt")
-    processes = read_input(file_path)
+if __name__ == "__main__":
+    input_file = sys.argv[1] if len(sys.argv) > 1 else "input.txt"
 
-    total_resources = [0, 1, 0]
-
-    fcfs_scheduler(processes, total_resources)
-
-if __name__ == '__main__':
-    main()
+    try:
+        n, m, total_resources, processes = parse_input(input_file)
+        run_simulation(n, m, total_resources, processes)
+    except Exception as e:
+        print(f"ERROR: {e}")
+        sys.exit(1)

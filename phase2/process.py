@@ -1,14 +1,14 @@
-from copy import deepcopy
-
+# process.py
 class Process:
-    def __init__(self, pid):
+    def __init__(self, pid, instructions):
         self.pid = pid
-        self.commands = []
+        self.instructions = instructions
+        self.pc = 0
+        self.state = 'READY'
+        self.sleep_until = 0
+        self.allocation = []
+        self.max_demand = []
 
-    def add_command(self, command, *args):
-        self.commands.append((command, *args))
-
-    def fork_child(self, next_pid, start_index=1):
-        child = Process(next_pid)
-        child.commands = deepcopy(self.commands[start_index:])
-        return child
+    def __repr__(self):
+        return (f"Process(pid={self.pid}, state={self.state}, "
+                f"pc={self.pc}, alloc={self.allocation}, max={self.max_demand})")
