@@ -7,7 +7,7 @@ if __name__ == "__main__":
     input_file = sys.argv[1] if len(sys.argv) > 1 else "input.txt"
 
     try:
-        n, m, total_resources, processes = parse_input(input_file)
+        n, m, total_resources, ps, pc, processes = parse_input(input_file)
         run_simulation(n, m, total_resources, processes)
     except Exception as e:
         print(f"ERROR: {e}")
