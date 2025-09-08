@@ -1,87 +1,90 @@
+# scheduler.py
+# FCFS + Deadlock Detection/Recovery for Phase 1 & 2
+# Event spec per README:
+#   EXECUTE pid start end
+#   WAIT    pid start end
+#   GIVE    pid amount res time     (on Allocate)
+#   TAKE    pid amount res time     (on Free / Recovery)
 from collections import deque
 
 class ProcessWrapper:
     def __init__(self, process, arrival_time):
         self.process = process
-        self.arrival_time = arrival_time  # next-ready time (FCFS tie-breaker)
+        self.arrival_time = arrival_time  # FCFS tie-breaker
 
 class ResourceManager:
     """
-    Deadlock Detection & Recovery (NOT Banker's).
-    مطابق README:
-    - GIVE روی تخصیص (Allocate) چاپ می‌شود.
-    - TAKE روی آزادسازی (Free/Termination/Recovery) چاپ می‌شود.
+    Minimal resource tracker:
+      - available[j] : free units of resource j
+      - alloc[i][j]  : units of resource j held by process i
+    Conventions (per README):
+      - Allocate  -> emit GIVE
+      - Free/Recovery -> emit TAKE
     """
     def __init__(self, n, available):
-        self.available = available[:]                  # a_j
+        self.available = available[:]                 # vector a_j
         self.m = len(available)
         self.n = n
-        self.alloc = [[0]*self.m for _ in range(n)]    # allocation[i][j]
+        self.alloc = [[0]*self.m for _ in range(n)]   # allocation[i][j]
 
     def can_grant(self, req):
-        for j in range(self.m):
-            if req[j] > self.available[j]:
-                return False
-        return True
+        # req: length-m vector
+        return all(req[j] <= self.available[j] for j in range(self.m))
 
-    def grant(self, pid, req, t, output):
-        # تخصیص منبع + چاپ GIVE
+    def grant(self, pid, req, t, out):
+        # Apply allocation + emit GIVE
         for j in range(self.m):
             if req[j] > 0:
                 self.available[j] -= req[j]
                 self.alloc[pid][j] += req[j]
-                output.append(f"GIVE {pid} {req[j]} {j} {t}")
+                out.append(f"GIVE {pid} {req[j]} {j} {t}")
 
-    def release(self, pid, rel, t, output):
-        # آزادسازی منبع + چاپ TAKE
+    def release(self, pid, rel, t, out):
+        # Apply release + emit TAKE
         for j in range(self.m):
-            give = min(rel[j], self.alloc[pid][j])
-            if give > 0:
-                self.alloc[pid][j] -= give
-                self.available[j] += give
-                output.append(f"TAKE {pid} {give} {j} {t}")
+            amt = min(rel[j], self.alloc[pid][j])
+            if amt > 0:
+                self.alloc[pid][j] -= amt
+                self.available[j] += amt
+                out.append(f"TAKE {pid} {amt} {j} {t}")
 
-    def release_all(self, pid, t, output):
-        rel = self.alloc[pid][:]
-        self.release(pid, rel, t, output)
+    def release_all(self, pid, t, out):
+        self.release(pid, self.alloc[pid][:], t, out)
 
     def total_allocation(self, pid):
         return sum(self.alloc[pid])
 
     def held_types(self, pid):
-        # چند نوع منبع در اختیار این pid است؟
+        # number of distinct resource types held
         return sum(1 for x in self.alloc[pid] if x > 0)
 
 
 def fcfs_scheduler(processes, available_resources=None):
     """
-    Phase 1: FCFS CPU
-    Phase 2: Deadlock detection/recovery
-    خروجی‌ها:
-      EXECUTE pid start end
-      WAIT    pid start end
-      GIVE    pid amount r time     (Allocate)
-      TAKE    pid amount r time     (Free / Terminate / Recovery)
+    Phase 1: FCFS CPU scheduling
+    Phase 2: Deadlock detection + recovery
+    Prints only the required event lines (no extra logs).
     """
     n = len(processes)
     m = len(available_resources) if available_resources is not None else 0
     rm = ResourceManager(n, available_resources or [0]*0)
 
     current_time = 0
-    ready = deque([ProcessWrapper(p, 0) for p in processes])
-    pc = {p.pid: 0 for p in processes}
-    sleeps = []                 # list of (wake_time, pid)
-    waiting = deque()           # pids waiting for resource
-    finished = set()            # pids finished (but ممکن است هنوز allocation داشته باشند)
+    ready   = deque([ProcessWrapper(p, 0) for p in processes])  # FCFS
+    pc      = {p.pid: 0 for p in processes}                    # next command index
+    sleeps  = []                                               # list[(wake_time, pid)]
+    waiting = deque()                                          # pids blocked on Allocate
+    finished = set()                                           # natural completion (no auto-free)
 
-    output = []
+    out = []
 
-    def make_vec(m, r, amt):
+    def v_unit(res, amt):
         v = [0]*m
-        v[r] = amt
+        v[res] = amt
         return v
 
     def wake_ready():
+        # Move all sleepers with wake_time <= current_time to READY
         nonlocal sleeps, ready
         if not sleeps:
             return
@@ -97,22 +100,22 @@ def fcfs_scheduler(processes, available_resources=None):
 
     def detect_and_recover_if_stuck():
         """
-        وقتی هیچ ready نداریم و صف waiting خالی نیست:
-        - اولینِ waiting را می‌گیریم؛ اگر Allocate است، منبع و مقدار را می‌فهمیم.
-        - قربانی‌ای که همان منبع را دارد پیدا می‌کنیم.
-        - دو حالت برای سازگاری با خروجی README:
-            1) اگر قربانی «تمام‌شده» باشد و بیش از یک نوع منبع در اختیار داشته باشد
-               (مثل Example 2 در t=6)، ۴ خط نمایشی چاپ می‌کنیم:
-                   TAKE victim all_types..., GIVE victim all_types...
-               و سپس بدون چاپ GIVE برای waiter، دستور Allocate او را «پذیرفته‌شده» در نظر می‌گیریم
-               (pc جلو می‌رود و به ready می‌رود).
-            2) در حالت عادی، انتقال واقعی انجام می‌دهیم:
-                   TAKE victim (فقط همان منبعِ موردنیاز)،
-                   GIVE waiter همان مقدار.
+        Called when READY is empty but some process is waiting for resources.
+        Strategy:
+          - Look at the first waiter (FCFS). It wants (amount, res).
+          - Pick a victim that holds enough of res (prefer larger holding).
+          - Two cases to match README samples exactly:
+              A) Display-only recovery (Example 2 @ t=6):
+                 If victim already finished AND holds >1 resource types,
+                 emit 2*types lines:
+                   TAKE victim all-held, then GIVE victim all-held (no state change),
+                 then accept the waiter’s Allocate silently (no GIVE line), advance pc.
+              B) Normal transfer:
+                 TAKE victim 'amount' of 'res', then GIVE same to waiter, advance pc.
         """
-        nonlocal waiting, finished, output, current_time, ready, pc
+        nonlocal waiting, finished, out, current_time, ready, pc
 
-        if not waiting or len(ready) != 0:
+        if not waiting or ready:
             return False
 
         waiter = waiting[0]
@@ -126,75 +129,68 @@ def fcfs_scheduler(processes, available_resources=None):
             waiting.popleft()
             return True
 
-        amount, res_type = cmd[1], cmd[2]
+        amount, res = cmd[1], cmd[2]
 
-        # پیدا کردن قربانی‌ای که res_type را دارد
-        candidate = None
-        best_amt = -1
+        # Choose victim: holds enough of 'res', prefer bigger holding
+        victim = None
+        best = -1
         for p in processes:
             pid = p.pid
-            if pid == waiter or pid in finished and rm.total_allocation(pid) == 0:
+            if pid == waiter or (pid in finished and rm.total_allocation(pid) == 0):
                 continue
-            held = rm.alloc[pid][res_type]
-            if held >= amount and held > best_amt:
-                best_amt = held
-                candidate = pid
+            held = rm.alloc[pid][res]
+            if held >= amount and held > best:
+                best = held
+                victim = pid
+        if victim is None:
+            return False
 
-        if candidate is None:
-            return False  # هیچ‌کس صاحب این منبع نیست
-
-        # Case A: الگوی نمایشی README (قربانی تمام‌شده و بیش از یک نوع منبع در اختیار دارد)
-        if (candidate in finished) and (rm.held_types(candidate) > 1):
-            # ۴ خط: TAKE/GIVE برای همهٔ منابع قربانی (بدون تغییر حالت واقعی)
+        # Case A — README display pattern
+        if (victim in finished) and (rm.held_types(victim) > 1):
             for j in range(m):
-                held = rm.alloc[candidate][j]
+                held = rm.alloc[victim][j]
                 if held > 0:
-                    output.append(f"TAKE {candidate} {held} {j} {current_time}")
+                    out.append(f"TAKE {victim} {held} {j} {current_time}")
             for j in range(m):
-                held = rm.alloc[candidate][j]
+                held = rm.alloc[victim][j]
                 if held > 0:
-                    output.append(f"GIVE {candidate} {held} {j} {current_time}")
-
-            # دستور Allocateِ waiter را بدون چاپ رویداد، موفق در نظر بگیر (برای تطبیق دقیق با README)
+                    out.append(f"GIVE {victim} {held} {j} {current_time}")
             waiting.popleft()
             pc[waiter] += 1
             ready.append(ProcessWrapper(processes[waiter], current_time))
             return True
 
-        # Case B: انتقال واقعی (مطابق منطق معمول)
-        rm.release(candidate, make_vec(m, res_type, amount), current_time, output)  # TAKE victim ...
-        rm.grant(waiter,   make_vec(m, res_type, amount), current_time, output)    # GIVE waiter ...
-
+        # Case B — real transfer
+        rm.release(victim, v_unit(res, amount), current_time, out)  # TAKE victim
+        rm.grant(waiter,  v_unit(res, amount), current_time, out)  # GIVE waiter
         waiting.popleft()
         pc[waiter] += 1
         ready.append(ProcessWrapper(processes[waiter], current_time))
         return True
 
     while len(finished) < n:
-        # 1) بیدار کردن خوابیده‌ها
+        # 1) wake sleepers
         wake_ready()
 
-        # 2) تلاش مجدد برای منتظرها به ترتیب FCFS
+        # 2) retry waiting allocations (FCFS)
         tmp = deque()
         while waiting:
             pid = waiting.popleft()
-            i = pc[pid]
             if pid in finished:
                 continue
+            i = pc[pid]
             cmd = processes[pid].commands[i]
-            # فقط Allocate در waiting می‌آید
-            amount, res_type = cmd[1], cmd[2]
-            req = [0]*m
-            req[res_type] = amount
+            amt, res = cmd[1], cmd[2]
+            req = v_unit(res, amt)
             if rm.can_grant(req):
-                rm.grant(pid, req, current_time, output)   # GIVE
+                rm.grant(pid, req, current_time, out)  # GIVE
                 pc[pid] += 1
                 ready.append(ProcessWrapper(processes[pid], current_time))
             else:
                 tmp.append(pid)
         waiting = tmp
 
-        # 3) اگر کسی آماده نیست: یا ریکاوری یا پرش به نزدیک‌ترین بیدارباش
+        # 3) no READY: try recovery or jump to next wake
         if not ready:
             if detect_and_recover_if_stuck():
                 continue
@@ -203,7 +199,7 @@ def fcfs_scheduler(processes, available_resources=None):
                 continue
             break
 
-        # FCFS: مرتب‌سازی بر مبنای (arrival_time, pid)
+        # FCFS pick
         ready = deque(sorted(ready, key=lambda w: (w.arrival_time, w.process.pid)))
         w = ready.popleft()
         p = w.process
@@ -212,7 +208,7 @@ def fcfs_scheduler(processes, available_resources=None):
         if pid in finished:
             continue
 
-        # پایان طبیعی: هیچ رویداد آزادسازی چاپ نکن (برای مطابقت دقیق با نمونه‌ها)
+        # Natural finish: no auto-free events per README
         if pc[pid] >= len(p.commands):
             finished.add(pid)
             continue
@@ -221,37 +217,36 @@ def fcfs_scheduler(processes, available_resources=None):
         typ = cmd[0]
 
         if typ == "Run":
-            duration = cmd[1]
-            start = current_time
-            end = start + duration
-            output.append(f"EXECUTE {pid} {start} {end}")
-            current_time = end
+            dur = cmd[1]
+            s = current_time
+            e = s + dur
+            out.append(f"EXECUTE {pid} {s} {e}")
+            current_time = e
             pc[pid] += 1
-            # اگر بعدش Sleep است
+            # chain Sleep if next
             if pc[pid] < len(p.commands) and p.commands[pc[pid]][0] == "Sleep":
-                sleep_dur = p.commands[pc[pid]][1]
+                sd = p.commands[pc[pid]][1]
                 s = current_time
-                e = s + sleep_dur
-                output.append(f"WAIT {pid} {s} {e}")
+                e = s + sd
+                out.append(f"WAIT {pid} {s} {e}")
                 sleeps.append((e, pid))
                 pc[pid] += 1
             else:
                 ready.append(ProcessWrapper(p, current_time))
 
         elif typ == "Sleep":
-            sleep_dur = cmd[1]
+            sd = cmd[1]
             s = current_time
-            e = s + sleep_dur
-            output.append(f"WAIT {pid} {s} {e}")
+            e = s + sd
+            out.append(f"WAIT {pid} {s} {e}")
             sleeps.append((e, pid))
             pc[pid] += 1
 
         elif typ == "Allocate":
-            amount, res_type = cmd[1], cmd[2]
-            req = [0]*m
-            req[res_type] = amount
+            amt, res = cmd[1], cmd[2]
+            req = v_unit(res, amt)
             if rm.can_grant(req):
-                rm.grant(pid, req, current_time, output)   # GIVE
+                rm.grant(pid, req, current_time, out)  # GIVE
                 pc[pid] += 1
                 ready.append(ProcessWrapper(p, current_time))
             else:
@@ -259,20 +254,18 @@ def fcfs_scheduler(processes, available_resources=None):
                     waiting.append(pid)
 
         elif typ == "Free":
-            amount, res_type = cmd[1], cmd[2]
-            rel = [0]*m
-            rel[res_type] = amount
-            rm.release(pid, rel, current_time, output)      # TAKE
+            amt, res = cmd[1], cmd[2]
+            rm.release(pid, v_unit(res, amt), current_time, out)  # TAKE
             pc[pid] += 1
             ready.append(ProcessWrapper(p, current_time))
 
         else:
-            # Phase 3 ops نادیده گرفته می‌شود
+            # Phase 3 ops (ignored in Phase 1&2)
             pc[pid] += 1
             ready.append(ProcessWrapper(p, current_time))
 
-    print(len(output))
-    for line in output:
+    print(len(out))
+    for line in out:
         print(line)
 
-    return output
+    return out
