@@ -1,0 +1,16 @@
+2  
+2  
+1 1  
+0 0  
+5  
+Allocate 1 0  
+Run 1
+Sleep 2  
+Allocate 1 1  
+Run 1  
+5  
+Allocate 1 1  
+Run 1  
+Sleep 4
+Allocate 1 0  
+Run 1
