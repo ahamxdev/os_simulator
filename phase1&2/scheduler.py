@@ -7,10 +7,12 @@
 #   TAKE    pid amount res time     (on Free / Recovery)
 from collections import deque
 
+
 class ProcessWrapper:
     def __init__(self, process, arrival_time):
         self.process = process
         self.arrival_time = arrival_time  # FCFS tie-breaker
+
 
 class ResourceManager:
     """
@@ -21,11 +23,12 @@ class ResourceManager:
       - Allocate  -> emit GIVE
       - Free/Recovery -> emit TAKE
     """
+
     def __init__(self, n, available):
-        self.available = available[:]                 # vector a_j
+        self.available = available[:]  # vector a_j
         self.m = len(available)
         self.n = n
-        self.alloc = [[0]*self.m for _ in range(n)]   # allocation[i][j]
+        self.alloc = [[0] * self.m for _ in range(n)]  # allocation[i][j]
 
     def can_grant(self, req):
         # req: length-m vector
@@ -67,19 +70,19 @@ def fcfs_scheduler(processes, available_resources=None):
     """
     n = len(processes)
     m = len(available_resources) if available_resources is not None else 0
-    rm = ResourceManager(n, available_resources or [0]*0)
+    rm = ResourceManager(n, available_resources or [0] * 0)
 
     current_time = 0
-    ready   = deque([ProcessWrapper(p, 0) for p in processes])  # FCFS
-    pc      = {p.pid: 0 for p in processes}                    # next command index
-    sleeps  = []                                               # list[(wake_time, pid)]
-    waiting = deque()                                          # pids blocked on Allocate
-    finished = set()                                           # natural completion (no auto-free)
+    ready = deque([ProcessWrapper(p, 0) for p in processes])  # FCFS
+    pc = {p.pid: 0 for p in processes}  # next command index
+    sleeps = []  # list[(wake_time, pid)]
+    waiting = deque()  # pids blocked on Allocate
+    finished = set()  # natural completion (no auto-free)
 
     out = []
 
     def v_unit(res, amt):
-        v = [0]*m
+        v = [0] * m
         v[res] = amt
         return v
 
@@ -162,7 +165,7 @@ def fcfs_scheduler(processes, available_resources=None):
 
         # Case B — real transfer
         rm.release(victim, v_unit(res, amount), current_time, out)  # TAKE victim
-        rm.grant(waiter,  v_unit(res, amount), current_time, out)  # GIVE waiter
+        rm.grant(waiter, v_unit(res, amount), current_time, out)  # GIVE waiter
         waiting.popleft()
         pc[waiter] += 1
         ready.append(ProcessWrapper(processes[waiter], current_time))
